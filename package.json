@@ -1,0 +1,44 @@
+{
+  "name": "ai-privacy-gateway",
+  "version": "0.1.6",
+  "private": true,
+  "description": "本机 AI 请求检测、替换和审计桌面应用",
+  "license": "MIT",
+  "author": "Privacy Gateway Contributors",
+  "main": "out/main/index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && electron-vite build",
+    "test": "tsx --test tests/privacy.test.ts tests/gateway.test.ts tests/workbuddy.test.ts tests/rules.test.ts tests/native-inspection.test.ts tests/rule-settings.test.ts tests/protection.test.ts",
+    "test:native": "tsx --test tests/native-addon.test.ts tests/native-proxy.test.ts",
+    "test:desktop": "npm run build && playwright test",
+    "check": "npm run typecheck && npm test",
+    "pack": "npm run prepare:native && npm run build && electron-builder --dir",
+    "dist:mac": "npm run prepare:native && npm run build && electron-builder --mac --publish never",
+    "dist:win": "node scripts/prepare-native.mjs win-x64 && npm run build && electron-builder --win --publish never",
+    "prepare:native": "node scripts/prepare-native.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "1.45.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vite": "7.3.6"
+  }
+}

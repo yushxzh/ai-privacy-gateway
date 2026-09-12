@@ -1,0 +1,13 @@
+:root {
+  color-scheme: light;
+  --green: #285c47;
+  --pale-green: #eaf2ec;
+  --canvas: #f6f8f6;
+  --surface: #ffffff;
+  --ink: #25372e;
+  --muted: #68746d;
+  --line: #e1e7e2;
+  --focus: #3d7b5d;
+  --radius: 12px;
+  --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+}

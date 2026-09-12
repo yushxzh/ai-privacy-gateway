@@ -1,0 +1,42 @@
+appId: local.aiprivacy.gateway
+productName: AI Privacy Gateway
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+  - LICENSE
+  - THIRD_PARTY_LICENSES.md
+asar: true
+npmRebuild: false
+extraResources:
+  - from: src/https
+    to: https
+    filter:
+      - '*.py'
+  - from: resources/icon.png
+    to: icon.png
+mac:
+  extraResources:
+    - from: resources/native/mac-${arch}
+      to: native/mac-${arch}
+  icon: resources/icon.icns
+  identity: null
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  extraResources:
+    - from: resources/native/win-x64
+      to: native/win-x64
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
