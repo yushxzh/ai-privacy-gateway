@@ -1,5 +1,6 @@
 appId: local.aiprivacy.gateway
 productName: AI Privacy Gateway
+artifactName: AI-Privacy-Gateway-${version}-${os}-${arch}.${ext}
 directories:
   output: release
 files:
@@ -36,7 +37,9 @@ win:
       arch:
         - x64
 nsis:
+  include: resources/installer.nsh
   oneClick: false
   perMachine: false
+  allowElevation: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

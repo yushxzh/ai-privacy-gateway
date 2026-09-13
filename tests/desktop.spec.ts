@@ -84,8 +84,8 @@ test('桌面应用实际启动、生成过滤记录、隐藏原文、切换接�
     await page.getByRole('button', { name: 'Windows · PowerShell' }).click()
     await expect(page.locator('.command-card pre')).toContainText('$env:ANTHROPIC_CUSTOM_HEADERS')
     await expect(page.locator('.command-card pre')).not.toContainText('$env:ANTHROPIC_AUTH_TOKEN')
-    await expect(page.getByRole('tab')).toHaveCount(12)
-    await expect(page.getByText('WorkBuddy 原订阅可在「保护」页一键接入')).toBeVisible()
+    await expect(page.getByRole('tab')).toHaveCount(5)
+    await expect(page.getByText('WorkBuddy 原登录可在「保护」页一键接入')).toBeVisible()
     await page.getByRole('button', { name: '启用原认证转发' }).click()
     await expect(page.getByText('已启用', { exact: true })).toBeVisible()
     for (const name of [
@@ -97,11 +97,7 @@ test('桌面应用实际启动、生成过滤记录、隐藏原文、切换接�
       'OpenCode',
       'OpenClaw'
     ]) {
-      await page.getByRole('tab', { name: new RegExp('^' + name + ' ') }).click()
-      await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
-      await expect(page.getByRole('heading', { name: '原订阅接入待适配' })).toBeVisible()
-      await expect(page.getByRole('button', { name: '复制命令' })).toHaveCount(0)
-      await expect(page.getByRole('button', { name: '启用原认证转发' })).toHaveCount(0)
+      await expect(page.getByRole('tab', { name: new RegExp('^' + name + ' ') })).toHaveCount(0)
     }
     await page.getByRole('tab', { name: /^WorkBuddy / }).click()
     await expect(page.getByRole('button', { name: '启用 WorkBuddy 过滤' })).toBeDisabled()
@@ -211,6 +207,38 @@ test('桌面应用实际启动、生成过滤记录、隐藏原文、切换接�
   const reuse = createServer()
   await new Promise<void>((resolve) => reuse.listen(port, '127.0.0.1', resolve))
   await new Promise<void>((resolve) => reuse.close(() => resolve()))
+})
+
+test('证书移除入口可取消、显示损坏原因并重试，清理后恢复到可重新接入状态', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'apg-remove-ui-'))
+  const ca = join(dir, 'native-https/ca')
+  await mkdir(ca, { recursive: true })
+  await writeFile(join(ca, 'mitmproxy-ca-cert.pem'), 'synthetic broken certificate')
+  const probe = createServer()
+  await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve))
+  const port = (probe.address() as { port: number }).port
+  await new Promise<void>(resolve => probe.close(() => resolve()))
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => value !== undefined
+    && !['ELECTRON_RUN_AS_NODE', 'APG_HTTPS_RUNTIME', 'APG_HTTPS_CA_DIR'].includes(key))) as Record<string, string>
+  const app = await electron.launch({ args: [resolve('out/main/index.js')], env: { ...env, APG_TEST_USER_DATA: dir, PRIVACY_GATEWAY_PORT: String(port) } })
+  try {
+    const page = await app.firstWindow()
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    const section = page.getByRole('region', { name: '接入与证书管理' })
+    await section.getByRole('button', { name: '移除接入和证书' }).click()
+    await section.getByRole('button', { name: '取消', exact: true }).click()
+    expect(await readFile(join(ca, 'mitmproxy-ca-cert.pem'), 'utf8')).toBe('synthetic broken certificate')
+    await section.getByRole('button', { name: '移除接入和证书' }).click()
+    await section.getByRole('button', { name: '确认移除', exact: true }).click()
+    await expect(page.getByRole('alert').filter({ hasText: '本机公开证书无法读取' })).toBeVisible()
+    await rm(ca, { recursive: true })
+    await section.getByRole('button', { name: '确认移除', exact: true }).click()
+    await expect(section.getByRole('button', { name: '移除接入和证书' })).toBeDisabled()
+    await expect(page.getByRole('status')).toContainText('原生接入与证书已移除')
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1040, 720))
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: 'work/m1-ui/certificate-removed.png' })
+  } finally { await app.close(); await rm(dir, { recursive: true, force: true }) }
 })
 
 test('规则界面可新增、编辑、选择动作、启停、删除，并在应用重启后保留设置', async () => {

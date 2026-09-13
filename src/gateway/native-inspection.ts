@@ -47,6 +47,24 @@ export class NativeInspection {
     this.pipeline = new PrivacyPipeline(undefined, undefined, undefined, undefined, rules)
   }
 
+  /** 未检查的请求只记录固定原因，不保存正文、认证、查询参数或未知路径。 */
+  unchecked(issue: RecordSummary['inspectionIssue']): void {
+    if (!issue || !['unsupported', 'outside-scope', 'check-failed'].includes(issue)) throw new Error('检查状态无效。')
+    const outside = issue === 'outside-scope'
+    const notes = {
+      unsupported: '受保护的模型端点使用了不支持的协议、字段或内容，请求已停止外发。',
+      'outside-scope': '此请求不属于已适配的模型端点，未检查正文；不计为规则检查后放行。',
+      'check-failed': '本地内容检查未完成，请求已停止外发。'
+    }
+    this.records.add({ id: randomUUID(), time: new Date().toISOString(),
+      endpoint: outside ? '/未适配端点' : '/模型请求检查失败', model: '未检查请求',
+      provider: 'client', upstreamHost: 'www.workbuddy.ai', source: 'api', transport: 'https-proxy',
+      inspectionIssue: issue, action: outside ? 'ALLOW' : 'BLOCK', categories: [], findings: 0,
+      status: outside ? 'completed' : 'failed', durationMs: 0, stream: false,
+      httpStatus: outside ? undefined : issue === 'unsupported' ? 422 : 502, note: notes[issue]
+    }, '', '')
+  }
+
   async inspect(request: NativeRequest): Promise<{ id: string; action: Action; fields: NativeField[] }> {
     if (this.pending.size >= 16) throw new Error('原生请求数量超过限制。')
     if (request.host !== 'www.workbuddy.ai' || !/^\/[\w/.-]{1,180}$/.test(request.path) ||

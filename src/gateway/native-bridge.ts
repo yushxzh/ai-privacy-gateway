@@ -46,6 +46,7 @@ export class NativeBridge {
         if (request.url === '/ready') { this.ready?.(); reply(200, { ok: true }) }
         else if (request.url === '/health') reply(200, { ok: true })
         else if (request.url === '/inspect') reply(200, await this.inspection.inspect(input as NativeRequest))
+        else if (request.url === '/unchecked') { this.inspection.unchecked(input.issue); reply(200, { ok: true }) }
         else if (request.url === '/confirm') reply(200, this.inspection.confirm(input.id, input.body, input.authenticationUnchanged))
         else if (request.url === '/finish') {
           if (typeof input.id !== 'string' || (input.status !== undefined && !Number.isInteger(input.status))) throw new Error('参数无效。')

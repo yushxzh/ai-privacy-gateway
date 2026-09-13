@@ -258,6 +258,49 @@ test('WorkBuddy 任意模型与来源通过真实 HTTP 分别路由；无 Key �
   assert.throws(() => gateway.setWorkbuddyRoutes([{ ...routes[0], url: gateway.workbuddyUrl(routes[1].token) }]))
 })
 
+test('卸载恢复跨端口的受管理模型，保留外部改动和 Key，之后清除连接资料', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbuddy-uninstall-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const gateway = new PrivacyGateway({ ...DEFAULT_SETTINGS, port: 0 })
+  await gateway.start(); t.after(() => gateway.stop())
+  const path = join(dir, 'models.json'), state = join(dir, 'connections.json')
+  const rows = [{ id: 'a', url: 'https://one.example/v1', apiKey: 'synthetic-private', supportsToolCall: true },
+    { id: 'b', url: 'https://two.example/v1', apiKey: 'synthetic-another' }]
+  await writeFile(path, JSON.stringify(rows))
+  const connections = new WorkBuddyConnections(path, state, gateway)
+  await connections.setModel('a', true); await connections.setModel('b', true)
+  const modified = JSON.parse(await readFile(path, 'utf8'))
+  modified[1].url = 'https://new.example/v1'
+  modified[1].supportsImages = true
+  await writeFile(path, JSON.stringify(modified))
+  const restarted = new WorkBuddyConnections(path, state, new PrivacyGateway(DEFAULT_SETTINGS))
+  await restarted.restoreAll()
+  const actual = JSON.parse(await readFile(path, 'utf8'))
+  assert.deepEqual(actual[0], rows[0])
+  assert.deepEqual(actual[1], modified[1])
+  await assert.rejects(readFile(state), { code: 'ENOENT' })
+  await restarted.restoreAll()
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), actual)
+})
+
+test('卸载遇到损坏模型配置或缺失原地址时停止，保留恢复资料和文件', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbuddy-uninstall-failure-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const gateway = new PrivacyGateway(DEFAULT_SETTINGS)
+  const path = join(dir, 'models.json'), state = join(dir, 'connections.json')
+  await writeFile(path, JSON.stringify([{ id: 'a', url: 'https://one.example/v1' }]))
+  const connections = new WorkBuddyConnections(path, state, gateway)
+  await connections.setModel('a', true)
+  await writeFile(path, '{broken')
+  await assert.rejects(connections.restoreAll(), /配置无法读取/)
+  assert.equal(await readFile(path, 'utf8'), '{broken')
+  assert.ok((await readFile(state, 'utf8')).includes('one.example'))
+  const unknown = JSON.stringify([{ id: 'unknown', url: 'http://127.0.0.1:9999/workbuddy/' + 'a'.repeat(64) + '/v1/chat/completions' }])
+  await writeFile(path, unknown)
+  await assert.rejects(connections.restoreAll(), /原连接资料缺失/)
+  assert.equal(await readFile(path, 'utf8'), unknown)
+})
+
 test('外部修改来源、能力或删除模型后撤销旧入口，重新接入只保留现存模型的恢复资料', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'workbuddy-external-'))
   t.after(() => rm(dir, { recursive: true, force: true }))

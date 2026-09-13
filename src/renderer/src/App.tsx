@@ -61,6 +61,7 @@ const providerNames: Record<ProviderKind, string> = {
 const categoryNames = CATEGORY_NAMES
 const actionNames: Record<Action, string> = { ALLOW: '放行', MASK: '替换', BLOCK: '阻断', ROUTE: '路由' }
 const statusNames = { pending: '处理中', completed: '已完成', blocked: '已阻断', failed: '请求失败' }
+const availableClients = CLIENTS.filter(item => ['sdk', 'deepseek', 'workbuddy', 'codex', 'claude'].includes(item.id))
 type Page = 'overview' | 'records' | 'integrations' | 'settings' | 'rules'
 
 function Badge({ action }: { action: Action }) {
@@ -70,6 +71,12 @@ function Badge({ action }: { action: Action }) {
       {actionNames[action]}
     </span>
   )
+}
+
+function RecordBadge({ record }: { record: RecordSummary }) {
+  return record.inspectionIssue
+    ? <span className="badge block">{record.inspectionIssue === 'outside-scope' ? '未检查' : '检查失败'}</span>
+    : <Badge action={record.action} />
 }
 function Button({
   children,
@@ -122,6 +129,11 @@ export function App() {
   useEffect(() => {
     let current = true
     setDetail(null)
+    if (selected && snapshot && !snapshot.records.some(record => record.id === selected)) {
+      setSelected(undefined)
+      setReveal(false)
+      return
+    }
     if (selected)
       void api
         .record(selected, reveal)
@@ -245,7 +257,7 @@ export function App() {
           </div>
           <div className="build-label">
             <span>本地预览版</span>
-            <code>v0.1.6</code>
+            <code>v{api.version}</code>
           </div>
         </div>
       </aside>
@@ -350,7 +362,7 @@ export function App() {
                   label="本次启动的请求"
                   value={snapshot.counters.total}
                   icon={<Activity size={17} />}
-                  hint="来自实际网关请求"
+                  hint={`其中 ${snapshot.counters.unchecked} 条未完成内容检查`}
                 />
                 <Stat
                   label="敏感内容已替换"
@@ -377,23 +389,23 @@ export function App() {
                 <section className="panel activity-panel">
                   <div className="panel-heading">
                     <h3>
-                      最近请求 <span>{snapshot.records.length}</span>
+                      最近模型请求 <span>{snapshot.records.filter(record => record.inspectionIssue !== 'outside-scope').length}</span>
                     </h3>
                     <button className="text-button" onClick={() => setPage('records')}>
                       查看全部 <ArrowRight size={14} />
                     </button>
                   </div>
-                  <RecordList records={snapshot.records.slice(0, 5)} onSelect={selectRecord} compact />
+                  <RecordList records={snapshot.records.filter(record => record.inspectionIssue !== 'outside-scope').slice(0, 5)} onSelect={selectRecord} compact />
                 </section>
                 <section className="panel start-panel">
                   <div className="panel-heading">
                     <h3>连接一个应用</h3>
                     <Plug size={17} />
                   </div>
-                  <p>WorkBuddy 可在上方一键接入。其他客户端查看对应接入条件。</p>
+                  <p>WorkBuddy 原登录在上方接入；自备 API 使用下方配置。</p>
                   {[
                     { title: 'OpenAI / DeepSeek SDK', tag: '文本 API' },
-                    { title: '10 个客户端的原订阅接入', tag: '适配范围与进度' }
+                    { title: '自定义 API 与实验接入', tag: 'WorkBuddy / Codex / Claude Code' }
                   ].map((item) => (
                     <button key={item.title} className="connect-row" onClick={() => setPage('integrations')}>
                       <Code2 size={18} />
@@ -472,10 +484,10 @@ export function App() {
             {detail ? (
               <>
                 <div className="detail-meta">
-                  <Badge action={detail.action} />
+                  <RecordBadge record={detail} />
                   <span>{new Date(detail.time).toLocaleString('zh-CN', { hour12: false })}</span>
                   <span>{detail.durationMs} ms</span>
-                  <span>{statusNames[detail.status]}</span>
+                  <span>{detail.inspectionIssue === 'outside-scope' ? '范围外请求' : statusNames[detail.status]}</span>
                 </div>
                 <div className="detail-tags">
                   {detail.categories.map((category) => (
@@ -486,13 +498,13 @@ export function App() {
                 <p className="detail-note">{detail.note}</p>
                 {!!detail.ruleMatches?.length ? <p className="detail-note">命中规则：{detail.ruleMatches.map(rule => `${rule.name}（${rule.source === 'builtin' ? '内置' : '自定义'} · ${actionNames[rule.action]}）`).join('、')} · 配置版本 {detail.rulesRevision}</p>
                   : !!detail.ruleIds?.length && <p className="detail-note">命中规则：{detail.ruleIds.map(id => RULES.find(rule => rule.id === id)?.name ?? id).join('、')}</p>}
-                {detail.action === 'BLOCK' && <button className="text-button" onClick={() => { setSelected(undefined); setReveal(false); setPage('rules') }}>修改规则的处理动作</button>}
-                {detail.transport === 'https-proxy' && <p className="detail-note">HTTPS 代理 · 原官方服务：{detail.upstreamHost} · 原客户端认证。下方优先展示发生替换的内容字段。</p>}
+                {detail.action === 'BLOCK' && !detail.inspectionIssue && <button className="text-button" onClick={() => { setSelected(undefined); setReveal(false); setPage('rules') }}>修改规则的处理动作</button>}
+                {detail.transport === 'https-proxy' && !detail.inspectionIssue && <p className="detail-note">HTTPS 代理 · 原官方服务：{detail.upstreamHost} · 原客户端认证。下方优先展示发生替换的内容字段。</p>}
                 {detail.outbound && <div className="detail-id">
                   <span>实际请求正文：{detail.outbound.bytes} 字节 · 原认证{detail.outbound.authenticationUnchanged ? '保持不变' : '校验失败'} · 命中原文{detail.outbound.originalsAbsent ? '已移除' : '仍存在'}</span>
                   <code>SHA-256 {detail.outbound.sha256}</code>
                 </div>}
-                <div className="comparison">
+                {detail.inspectionIssue ? <p className="subtle-note">未保存该请求的正文、认证或查询参数。此记录不计为规则检查后放行。</p> : <div className="comparison">
                   <div>
                     <div className="comparison-heading">
                       <strong>原始数据</strong>
@@ -513,12 +525,12 @@ export function App() {
                   </div>
                   <div>
                     <div className="comparison-heading">
-                      <strong>{detail.action === 'BLOCK' ? '替换预览 · 未外发' : detail.transport === 'https-proxy' ? '外发正文中的内容字段' : '发送给上游的数据'}</strong>
+                      <strong>{detail.action === 'BLOCK' ? '替换预览 · 未外发' : detail.status !== 'completed' && !detail.outbound ? '替换预览 · 尚未确认外发' : detail.transport === 'https-proxy' ? '外发正文中的内容字段' : '发送给上游的数据'}</strong>
                       <span className="mini-label">已处理</span>
                     </div>
                     <pre data-testid="sanitized-data">{detail.sanitized}</pre>
                   </div>
-                </div>
+                </div>}
                 {detail.truncated && <p className="subtle-note">长记录保留开头与结尾，每侧最多 24,000 个字符；中间内容省略，不影响完整请求的检测。</p>}
                 <div className="detail-id">
                   请求 ID <code>{detail.id}</code>
@@ -608,10 +620,10 @@ function RecordList({
           <span className="record-category">
             {record.categories.length
               ? record.categories.map((category) => categoryNames[category]).join('、')
-              : '未命中规则'}
+              : record.inspectionIssue ? '未完成检查' : '未命中规则'}
           </span>
           <span>
-            <Badge action={record.action} />
+            <RecordBadge record={record} />
           </span>
           <span className="record-time">
             {new Date(record.time).toLocaleTimeString('zh-CN', { hour12: false })}
@@ -636,7 +648,7 @@ function RecordsPage({
   const [search, setSearch] = useState('')
   const records = snapshot.records.filter(
     (record) =>
-      (filter === 'ALL' || record.action === filter) &&
+      (filter === 'ALL' || (filter === 'UNCHECKED' ? !!record.inspectionIssue : !record.inspectionIssue && record.action === filter)) &&
       `${record.model} ${record.endpoint} ${record.categories.join(' ')}`
         .toLowerCase()
         .includes(search.toLowerCase())
@@ -646,7 +658,7 @@ function RecordsPage({
       <div className="page-heading">
         <div>
           <h1>请求记录</h1>
-          <p>查看检查结果与替换前后的数据，最多保留最近 100 条。</p>
+          <p>最多保留 100 条；其中范围外流量仅保留最近 20 条。</p>
         </div>
         <Button onClick={onClear} disabled={!snapshot.records.length}>
           <Trash2 size={16} />
@@ -660,7 +672,8 @@ function RecordsPage({
               ['ALL', '全部'],
               ['MASK', '替换'],
               ['BLOCK', '阻断'],
-              ['ALLOW', '放行']
+              ['ALLOW', '放行'],
+              ['UNCHECKED', '未检查']
             ].map(([value, label]) => (
               <button
                 key={value}
@@ -765,7 +778,7 @@ function WorkBuddyConnection({ snapshot, run }: { snapshot: Snapshot; run: Run }
 }
 
 function IntegrationsPage({ snapshot, run }: { snapshot: Snapshot; run: Run }) {
-  const [client, setClient] = useState<ClientKind>('codex')
+  const [client, setClient] = useState<ClientKind>('sdk')
   const [shell, setShell] = useState<ShellKind>('bash')
   const [guide, setGuide] = useState<IntegrationGuide>()
   useEffect(() => {
@@ -783,7 +796,7 @@ function IntegrationsPage({ snapshot, run }: { snapshot: Snapshot; run: Run }) {
       <div className="page-heading">
         <div>
           <h1>接入应用</h1>
-          <p>优先保留原有订阅与登录。查看各客户端的接入条件和验证进度。</p>
+          <p>配置文本 API；实验入口的支持范围单独标明。</p>
         </div>
         <span className="endpoint-chip">
           <span className={snapshot.running ? 'tiny-dot' : 'tiny-dot off'} />
@@ -793,12 +806,12 @@ function IntegrationsPage({ snapshot, run }: { snapshot: Snapshot; run: Run }) {
       <div className="subscription-readiness">
         <Shield size={18} />
         <div>
-          <strong>WorkBuddy 原订阅可在「保护」页一键接入</strong>
+          <strong>WorkBuddy 原登录可在「保护」页一键接入</strong>
           <p>这里保留自定义 API 和其他客户端的接入方式；各客户端的验证进度分别列出。</p>
         </div>
       </div>
       <div className="integration-tabs" role="tablist" aria-label="客户端">
-        {CLIENTS.map((item, index) => (
+        {availableClients.map((item, index) => (
           <button
             role="tab"
             id={`client-tab-${item.id}`}
@@ -816,10 +829,10 @@ function IntegrationsPage({ snapshot, run }: { snapshot: Snapshot; run: Run }) {
                 event.key === 'Home'
                   ? 0
                   : event.key === 'End'
-                    ? CLIENTS.length - 1
-                    : (index + offset + CLIENTS.length) % CLIENTS.length
-              setClient(CLIENTS[next].id)
-              document.getElementById(`client-tab-${CLIENTS[next].id}`)?.focus()
+                    ? availableClients.length - 1
+                    : (index + offset + availableClients.length) % availableClients.length
+              setClient(availableClients[next].id)
+              document.getElementById(`client-tab-${availableClients[next].id}`)?.focus()
             }}
           >
             {['codex', 'claude', 'opencode', 'openclaw'].includes(item.id) ? (
@@ -952,6 +965,9 @@ function SettingsPage({ snapshot, busy, run }: { snapshot: Snapshot; busy: boole
   const running = snapshot.running || snapshot.nativeHttps
   const [form, setForm] = useState<Settings>({ ...snapshot.settings })
   const [key, setKey] = useState('')
+  const [confirmRemoval, setConfirmRemoval] = useState(false)
+  const canRemove = snapshot.protection?.managed || snapshot.protection?.certificatePresent
+  const changingProtection = busy || ['starting', 'stopping', 'removing'].includes(snapshot.protection?.state ?? '')
   function changeProvider(provider: ProviderKind) {
     const presets = {
       demo: { baseUrl: '', model: 'privacy-demo' },
@@ -969,7 +985,7 @@ function SettingsPage({ snapshot, busy, run }: { snapshot: Snapshot; busy: boole
       <div className="page-heading">
         <div>
           <h1>网关设置</h1>
-          <p>配置本地 API 网关。WorkBuddy 原订阅的开启与恢复位于「保护」页。</p>
+          <p>配置本地 API 网关。WorkBuddy 原登录的开启与恢复位于「保护」页。</p>
         </div>
         <Button
           disabled={busy}
@@ -1092,6 +1108,22 @@ function SettingsPage({ snapshot, busy, run }: { snapshot: Snapshot; busy: boole
           </div>
         </form>
         <div className="settings-aside">
+          <section className="panel privacy-settings certificate-settings" aria-label="接入与证书管理">
+            <h3>接入与证书</h3>
+            <p>卸载前移除原生接入，恢复 WorkBuddy 原代理，并撤销本产品证书信任和私钥。规则配置保留。</p>
+            {confirmRemoval ? <>
+              <p role="alert">WorkBuddy 会正常退出并重新打开，请先保存任务。再次开启保护时需要重新授权。</p>
+              <Button disabled={changingProtection} onClick={() => void run(async () => {
+                await api.removeProtection()
+                setConfirmRemoval(false)
+              }, '原生接入与证书已移除')}>确认移除</Button>
+              <Button disabled={changingProtection} onClick={() => setConfirmRemoval(false)}>取消</Button>
+            </> : <Button disabled={changingProtection || !canRemove}
+              title={canRemove ? undefined : '没有需移除的原生接入或证书'} onClick={() => setConfirmRemoval(true)}>
+              <Trash2 size={15} />移除接入和证书
+            </Button>}
+            {!canRemove && <small>没有需移除的原生接入或证书。</small>}
+          </section>
           <section className="panel privacy-settings">
             <ShieldCheck size={24} />
             <h3>本地优先的默认设置</h3>
@@ -1108,13 +1140,10 @@ function SettingsPage({ snapshot, busy, run }: { snapshot: Snapshot; busy: boole
               <strong>无</strong>
             </div>
             <div>
-              <span>语义分类模型</span>
-              <strong>未启用</strong>
+              <span>原生与流式回复</span>
+              <strong>保留代号</strong>
             </div>
-            <div>
-              <span>流式响应恢复</span>
-              <strong>待实现</strong>
-            </div>
+            <Button onClick={() => void run(() => api.openHelp())}><CircleHelp size={15} />使用与恢复指南</Button>
           </section>
           <div className="notice info">
             <CircleHelp size={17} />

@@ -1,10 +1,10 @@
 # 客户端接入说明
 
-最近更新：2026-09-12，版本 0.1.4。接入页覆盖十个原订阅适配目标与两个独立 API 入口。仅 Codex CLI、Claude Code、OpenAI SDK 和 DeepSeek SDK 有实验命令；其余入口展示已查证条件及缺口，不生成未经验证的原会员配置。
+最近更新：2026-09-13，版本 0.1.7。本文记录普通 API、WorkBuddy 自定义 API 及 Codex / Claude Code 实验入口。WorkBuddy 原登录的一键接入见 [使用指南](USAGE.md)，全部客户端的目标与状态见 [全局 PRD](PRD.md#客户端计划)。
 
-**真实订阅与完整编码任务尚未联调，当前不建议把 0.1.2 安装版接入日常编码。** 配置生成和模拟认证验证不代表账号不会被限制，也不代表各客户端原会员可用。先阅读[账号风险与十个平台兼容性](SUBSCRIPTIONS.md)。
+**Codex / Claude Code 原认证仍只有模拟验证，完整编码任务未完成。** 生成命令不等于一键接入或真实订阅验收；历史政策调研见 [原订阅资料](SUBSCRIPTIONS.md)，使用前需按实际版本和平台条件重新核验。
 
-WorkBuddy AI 5.5.2 已在本机完成一次原登录网络连通测试：启用临时 CONNECT 代理后，Free 账户的 Auto 任务成功，显示消耗 1.76 积分。该测试未接入隐私过滤；当前 App 的 API 地址不能直接填入 WorkBuddy「网络代理」。测试后已恢复「直接连接」，详见[WorkBuddy 实测记录](WORKBUDDY-VALIDATION.md)。
+WorkBuddy AI 5.5.2 的原登录 / Auto 文本过滤与一键恢复已在 macOS 实测。原生网络代理使用 `127.0.0.1:18788`；下述自定义 API 使用普通 API 入口，二者不能混填。Windows、付费套餐归属及完整工具循环尚未验收，见 [M1 交付记录](M1-DELIVERY.md)。
 
 ## 认证为什么不需要再填一份
 
@@ -12,18 +12,19 @@ WorkBuddy AI 5.5.2 已在本机完成一次原登录网络连通测试：启用�
 
 本地通行凭据与服务商认证分开：命令自动添加 `X-Privacy-Gateway-Token`，用于限制本机网关访问；该 Header 不发送给模型服务。App 不要求手动输入它，重启后重新复制命令即可。
 
-| 模式 | 本地访问校验 | 模型服务认证 | 地址来源 |
+| 模式 | 本地接入方式 | 模型服务认证 | 地址来源 |
 | --- | --- | --- | --- |
 | Codex / Claude Code 原认证转发 | 自动生成的独立 Header | 客户端原认证头 | 固定官方地址 |
+| WorkBuddy 原生 HTTPS | 本机代理与证书信任 | WorkBuddy 原请求认证保持不变 | 原官方请求目的地 |
 | OpenAI / DeepSeek SDK 配置模式 | 自动生成的 Bearer / x-api-key | App 中填写的上游 Key | App 中配置 |
 | WorkBuddy 自定义 API | 每模型独立 URL 通行值 | WorkBuddy 当前请求的模型认证 | 该模型原服务 URL |
 | 离线演示 | 自动生成的本地凭据 | 无 | 本机返回 |
 
 ## WorkBuddy 自定义 API
 
-先在 WorkBuddy 保存自定义模型的原服务 URL、模型 ID 和 Key。在本网关「接入应用 → WorkBuddy」选择对应模型并「启用过滤」，可同时启用多个不同来源，内置模型不改动。API Key 继续由 WorkBuddy 管理；网关只随当前请求转发到该模型已保存的来源，不跟随跳转，不另存 Key。
+先在 WorkBuddy 保存自定义模型的原服务 URL、模型 ID 和 Key。在本网关「保护 → 连接一个应用 → WorkBuddy」选择对应模型并「启用过滤」，可同时启用多个不同来源，此操作不修改内置模型。API Key 继续由 WorkBuddy 管理；网关只随当前请求转发到该模型已保存的来源，不跟随跳转，不另存 Key。
 
-每个模型有独立本地入口，支持「恢复直连」。接入状态在 App 重启后恢复。自定义模型被删除或地址改回原服务时自动撤销入口；必要时重启 WorkBuddy 以加载改过的配置。**网络代理继续使用直接连接。**
+每个模型有独立本地入口，支持「恢复直连」。接入状态在 App 重启后恢复。自定义模型被删除或地址改回原服务时自动撤销入口；必要时重启 WorkBuddy 以加载改过的配置。此接入不要求开启原生 HTTPS 保护，也不应把模型 API 地址填写到网络代理设置中。
 
 当前协议范围为 OpenAI Chat Completions 文本格式，启用时关闭工具、图片与思考能力。WorkBuddy 的「自定义协议」开关决定是否自动补齐 URL 路径，不能据此把 Anthropic 等不同 JSON 格式视为兼容。来源不限定为 DeepSeek；真实商业 API 验证为 DeepSeek，其余来源的路由通过本地 HTTP 用例验证。
 
@@ -31,7 +32,7 @@ WorkBuddy 会把网关的 403 阻断提示成「鉴权失败」，以网关记�
 
 ## Codex CLI
 
-1. 在 App 的「接入应用 → Codex CLI」启用「沿用客户端认证」。
+1. 在 App 的「保护 → 连接一个应用 → Codex CLI」启用「沿用客户端认证」。
 2. 保留 Codex 已有登录，在同一终端执行生成的命令。
 3. 命令为单次启动选择 `privacy_gateway_native` Provider，设置 `requires_openai_auth=true`，通过 `env_http_headers` 传入独立本地 Header，不设置 `env_key` 或覆盖模型选择。
 
@@ -43,7 +44,7 @@ Codex 官方源码明确区分服务商环境变量 Key 与原生登录认证，
 
 ## Claude Code
 
-1. 在「接入应用 → Claude Code」启用「沿用客户端认证」。
+1. 在「保护 → 连接一个应用 → Claude Code」启用「沿用客户端认证」。
 2. 保留 Claude Code 已有的 Claude 登录或 Anthropic API Key。
 3. 复制命令。它仅设置 `ANTHROPIC_BASE_URL` 并在 `ANTHROPIC_CUSTOM_HEADERS` 中追加本地通行 Header，不设置或覆盖 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`。
 
@@ -57,7 +58,7 @@ Codex 官方源码明确区分服务商环境变量 Key 与原生登录认证，
 
 ## OpenAI-compatible / DeepSeek SDK
 
-SDK 模式继续使用单独上游配置。在「网关设置」选择服务，填写已有 API Key 与模型 ID；在 SDK 接入页复制环境变量即可，无需手动填写本地通行凭据。
+SDK 模式继续使用单独上游配置。在「设置」选择服务，填写已有 API Key 与模型 ID；在 SDK 接入页复制环境变量即可，无需手动填写本地通行凭据。
 
 Python SDK 示例：
 
@@ -81,6 +82,6 @@ DeepSeek 使用 Chat Completions；不假设其支持 Responses。官网聊天�
 
 ## 验证边界
 
-已通过本地测试验证：原认证逐请求转发到固定目标、独立本地 Header 不外发、PII 被替换、凭据正文被阻断、Header 不进入记录。生成的 Bash / Zsh 命令使用模拟客户端校验，不运行真实模型请求。
+已通过本地测试验证：原认证逐请求转发到固定目标、独立本地 Header 不外发、PII 与凭据按规则替换 / 阻断、认证 Header 不进入记录。生成的 Bash / Zsh 命令使用模拟客户端校验，不运行真实模型请求。
 
-尚未用真实订阅账户完成端到端联调，也未完成 Codex / Claude Code 的工具协议。网关只覆盖实际经过该端口的模型请求，不自动覆盖客户端的遥测、更新、插件及其他出站路径。
+Codex / Claude Code 尚未用真实订阅完成端到端联调，也未完成工具协议。WorkBuddy 的实测范围单独记录。网关只覆盖实际经过对应入口且支持检查的模型请求，不自动覆盖客户端的遥测、更新、插件及其他出站路径。

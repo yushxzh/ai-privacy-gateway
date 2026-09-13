@@ -1,9 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopAPI } from '../shared/types'
+import { version } from '../../package.json'
 
 const api: DesktopAPI = {
   platform: process.platform,
+  version,
   setProtection: enabled => ipcRenderer.invoke('privacy:protection', enabled),
+  removeProtection: () => ipcRenderer.invoke('privacy:protection-remove'),
   snapshot: () => ipcRenderer.invoke('privacy:snapshot'),
   record: (id, reveal) => ipcRenderer.invoke('privacy:record', id, reveal),
   clearRecords: () => ipcRenderer.invoke('privacy:clear'),
@@ -13,6 +16,7 @@ const api: DesktopAPI = {
   guide: (client, shell) => ipcRenderer.invoke('privacy:guide', client, shell),
   copy: text => ipcRenderer.invoke('privacy:copy', text),
   openDocs: topic => ipcRenderer.invoke('privacy:docs', topic),
+  openHelp: () => ipcRenderer.invoke('privacy:help'),
   workbuddyConfiguration: () => ipcRenderer.invoke('privacy:workbuddy'),
   setWorkbuddyModel: (id, enabled) => ipcRenderer.invoke('privacy:workbuddy-model', id, enabled),
   inspectRules: text => ipcRenderer.invoke('privacy:rules-inspect', text),

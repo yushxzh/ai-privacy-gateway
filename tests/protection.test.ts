@@ -17,7 +17,7 @@ function setup(t: { after(fn: () => void): void }, original: Record<string, unkn
   const config = new WorkBuddyProxySettings(path, join(dir, 'backup.json'))
   const read = () => JSON.parse(readFileSync(path, 'utf8'))
   const events: string[] = []
-  let running = true, trusted = true, failOpen = 0, failClose = false, failStart = false, installs = true
+  let running = true, trusted = true, present = true, failOpen = 0, failClose = false, failStart = false, installs = true, failRemove = false
   const proxy = { running: false,
     async start() { events.push('start'); if (failStart) throw new Error('端口占用。'); this.running = true },
     async stop() { events.push('stop'); this.running = false } }
@@ -26,12 +26,15 @@ function setup(t: { after(fn: () => void): void }, original: Record<string, unkn
     async close() { events.push('close'); if (failClose) throw new Error('请先关闭 WorkBuddy。'); const result = running; running = false; return result },
     async open() { events.push('open'); if (failOpen > 0) { failOpen--; throw new Error('启动失败。') }; running = true }
   }, async checkCertificate() { events.push('trust'); return trusted },
-  async installCertificate() { events.push('install'); if (!installs) throw new Error('授权取消。'); trusted = true } }
+  async installCertificate() { events.push('install'); if (!installs) throw new Error('授权取消。'); trusted = true; present = true },
+  async certificatePresent() { return present },
+  async removeCertificate() { events.push('remove'); if (failRemove) throw new Error('证书撤销取消。'); trusted = false; present = false } }
   const protection = new WorkBuddyProtection(config, services, true)
   return { config, path, read, events, proxy, protection, services,
-    set: (value: { running?: boolean; trusted?: boolean; failOpen?: number; failClose?: boolean; failStart?: boolean; installs?: boolean }) => {
+    set: (value: { running?: boolean; trusted?: boolean; failOpen?: number; failClose?: boolean; failStart?: boolean; installs?: boolean; failRemove?: boolean }) => {
       running = value.running ?? running; trusted = value.trusted ?? trusted; failOpen = value.failOpen ?? failOpen
       failClose = value.failClose ?? failClose; failStart = value.failStart ?? failStart; installs = value.installs ?? installs
+      failRemove = value.failRemove ?? failRemove
     } }
 }
 
@@ -136,6 +139,53 @@ test('重开网关恢复上次连接，但不重启客户端或重复装证书',
   assert.deepEqual(f.events, ['start', 'trust'])
 })
 
+test('完全移除先关闭客户端、恢复配置和停止代理，撤销证书后再重开', async t => {
+  const f = setup(t, { 'http.proxySupport': 'on', language: 'zh' })
+  await f.protection.enable()
+  f.events.length = 0
+  await f.protection.remove()
+  assert.deepEqual(f.events, ['close', 'stop', 'remove', 'open'])
+  assert.deepEqual(f.read(), { 'http.proxySupport': 'on', language: 'zh' })
+  assert.equal(f.config.backup(), undefined)
+  assert.equal(f.protection.snapshot().certificatePresent, false)
+  assert.equal(f.protection.snapshot().certificateTrusted, false)
+  assert.equal(f.protection.snapshot().state, 'off')
+  await f.protection.enable()
+  assert.equal(f.events.includes('install'), true)
+})
+
+test('撤销取消后原连接可用，证书及恢复资料保留，再次移除可以完成', async t => {
+  const f = setup(t, { theme: 'light' })
+  await f.protection.enable(); f.set({ failRemove: true })
+  await assert.rejects(f.protection.remove(), /撤销取消/)
+  assert.deepEqual(f.read(), { theme: 'light' })
+  assert.ok(f.config.backup())
+  assert.equal(f.protection.snapshot().certificatePresent, true)
+  assert.equal(f.events.at(-1), 'open')
+  f.set({ failRemove: false })
+  await f.protection.remove()
+  assert.equal(f.config.backup(), undefined)
+})
+
+test('客户端拒绝退出时完全移除不会撤销证书或停止现有保护', async t => {
+  const f = setup(t); await f.protection.enable(); f.set({ failClose: true })
+  await assert.rejects(f.protection.remove(), /请先关闭/)
+  assert.equal(f.config.isConnected(), true)
+  assert.equal(f.proxy.running, true)
+  assert.equal(f.events.includes('remove'), false)
+})
+
+test('缺少运行时仍能发现并完全移除旧接入与证书', async t => {
+  const f = setup(t); f.config.apply()
+  const protection = new WorkBuddyProtection(f.config, f.services, false)
+  await protection.initialize()
+  assert.equal(protection.snapshot().managed, true)
+  assert.equal(protection.snapshot().certificatePresent, true)
+  await protection.remove()
+  assert.deepEqual(f.read(), {})
+  assert.equal(protection.snapshot().certificatePresent, false)
+})
+
 test('仅当前接入后完成且正文校验通过的真实请求才能显示已验证', async t => {
   const f = setup(t); await f.protection.enable()
   const record: RecordSummary = { id: 'synthetic', time: new Date(Date.now() + 1).toISOString(), endpoint: '/test', model: 'synthetic',
@@ -157,6 +207,21 @@ test('损坏的配置或恢复资料不会被空配置覆盖', t => {
   writeFileSync(f.path, '{}'); writeFileSync(f.config.backupPath, '{"schema":999}')
   assert.throws(() => f.config.apply(), /恢复资料损坏/)
   assert.deepEqual(f.read(), {})
+})
+
+test('检查失败后可由新成功请求恢复验证，但不能覆盖后续配置或运行时错误', async t => {
+  for (const changed of ['none', 'config', 'runtime']) {
+    const f = setup(t); await f.protection.enable()
+    const record: RecordSummary = { id: 'synthetic', time: new Date(Date.now() + 1).toISOString(), endpoint: '/test', model: 'synthetic',
+      provider: 'client', action: 'MASK', categories: ['EMAIL'], findings: 1, status: 'completed', durationMs: 10, source: 'api', stream: false,
+      transport: 'https-proxy', outbound: { sha256: 'a'.repeat(64), bytes: 12, authenticationUnchanged: true, originalsAbsent: true } }
+    f.protection.observe([{ ...record, status: 'failed', inspectionIssue: 'unsupported' }])
+    assert.equal(f.protection.snapshot().state, 'error')
+    if (changed === 'config') { writeFileSync(f.path, '{}'); f.protection.configurationChanged() }
+    if (changed === 'runtime') { f.proxy.running = false; f.protection.runtimeChanged(); f.proxy.running = true }
+    f.protection.observe([record])
+    assert.equal(f.protection.snapshot().state, changed === 'none' ? 'verified' : 'error')
+  }
 })
 
 test('连接配置损坏时应用仍能显示错误，操作不会永久停在加载状态', async t => {

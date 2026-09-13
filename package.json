@@ -1,6 +1,6 @@
 {
   "name": "ai-privacy-gateway",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "本机 AI 请求检测、替换和审计桌面应用",
   "license": "MIT",
@@ -14,8 +14,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && electron-vite build",
-    "test": "tsx --test tests/privacy.test.ts tests/gateway.test.ts tests/workbuddy.test.ts tests/rules.test.ts tests/native-inspection.test.ts tests/rule-settings.test.ts tests/protection.test.ts",
-    "test:native": "tsx --test tests/native-addon.test.ts tests/native-proxy.test.ts",
+    "test": "tsx --test tests/privacy.test.ts tests/gateway.test.ts tests/workbuddy.test.ts tests/rules.test.ts tests/native-inspection.test.ts tests/rule-settings.test.ts tests/protection.test.ts tests/certificate-store.test.ts tests/uninstall.test.ts",
+    "test:native": "tsx --test tests/native-addon.test.ts tests/native-proxy.test.ts tests/native-traffic.test.ts",
     "test:desktop": "npm run build && playwright test",
     "check": "npm run typecheck && npm test",
     "pack": "npm run prepare:native && npm run build && electron-builder --dir",

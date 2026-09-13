@@ -13,18 +13,24 @@ function preview(text: string): string {
 
 export class RecordStore extends EventEmitter {
   private entries: RecordDetail[] = []
-  private counters = { total: 0, masked: 0, blocked: 0, allowed: 0 }
+  private counters = { total: 0, masked: 0, blocked: 0, allowed: 0, unchecked: 0 }
   private generation = 0
 
   add(summary: RecordSummary, original: string, sanitized: string): number {
     const truncated = original.length > previewLimit || sanitized.length > previewLimit
     this.entries.unshift({ ...summary, original: preview(original), sanitized: preview(sanitized), truncated })
+    // 高频辅助流量只保留最近 20 条，避免把尚在执行的模型请求挤出记录。
+    let outside = 0
+    this.entries = this.entries.filter(entry => entry.inspectionIssue !== 'outside-scope' || ++outside <= 20)
     this.entries = this.entries.slice(0, 100)
     while (Buffer.byteLength(JSON.stringify(this.entries)) > 8 * 1024 * 1024) this.entries.pop()
     this.counters.total++
-    if (summary.action === 'MASK') this.counters.masked++
-    if (summary.action === 'BLOCK') this.counters.blocked++
-    if (summary.action === 'ALLOW') this.counters.allowed++
+    if (summary.inspectionIssue) this.counters.unchecked++
+    else {
+      if (summary.action === 'MASK') this.counters.masked++
+      if (summary.action === 'BLOCK') this.counters.blocked++
+      if (summary.action === 'ALLOW') this.counters.allowed++
+    }
     this.emit('change')
     return this.generation
   }
@@ -50,7 +56,7 @@ export class RecordStore extends EventEmitter {
   clear(): void {
     this.generation++
     this.entries = []
-    this.counters = { total: 0, masked: 0, blocked: 0, allowed: 0 }
+    this.counters = { total: 0, masked: 0, blocked: 0, allowed: 0, unchecked: 0 }
     this.emit('change')
   }
 }

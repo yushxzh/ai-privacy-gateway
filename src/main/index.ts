@@ -25,8 +25,10 @@ import type { CustomRuleInput, RulePolicy } from '../shared/rule-settings'
 import { WorkBuddyProtection } from './protection'
 import { WorkBuddyProxySettings } from './workbuddy-proxy-settings'
 import { WorkBuddyProcess, installUserCertificate } from './workbuddy-process'
-import { nativeExecutable, prepareCertificateDirectory } from './native-runtime'
+import { nativeExecutable, prepareCertificateDirectory, waitForNativeProxyExit } from './native-runtime'
 import { checkUserCertificate } from './certificate-check'
+import { CertificateStore } from './certificate-store'
+import { prepareUninstall } from './uninstall'
 
 if (!app.isPackaged && process.env.APG_TEST_USER_DATA) app.setPath('userData', process.env.APG_TEST_USER_DATA)
 app.setName('AI Privacy Gateway')
@@ -78,7 +80,11 @@ function handle<Args extends unknown[]>(channel: string, handler: (...args: Args
   })
 }
 
-if (!app.requestSingleInstanceLock()) app.quit()
+const uninstalling = process.argv.includes('--prepare-uninstall')
+if (!app.requestSingleInstanceLock()) {
+  if (uninstalling) app.exit(20)
+  else app.quit()
+}
 else {
   app.on('second-instance', () => {
     if (window?.isMinimized()) window.restore()
@@ -88,6 +94,19 @@ else {
   app
     .whenReady()
     .then(async () => {
+      if (uninstalling) {
+        try {
+          await waitForNativeProxyExit()
+          await prepareUninstall(new WorkBuddyProxySettings(
+            join(homedir(), '.workbuddy-ai/settings.json'), join(app.getPath('userData'), 'native-https/connection.json')),
+          workbuddy, new CertificateStore(join(app.getPath('userData'), 'native-https/ca')))
+          app.exit(0)
+        } catch {
+          console.error('接入或证书尚未完全恢复。请打开应用完成「移除接入和证书」，检查自定义模型原地址，再重新卸载。')
+          app.exit(21)
+        }
+        return
+      }
       const icon = nativeImage.createFromPath(
         app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../resources/icon.png')
       )
@@ -134,6 +153,11 @@ else {
         try { const result = enabled ? await protection.enable() : await protection.disable(); shutdownError = undefined; return result }
         catch (error) { throw new GatewayError(503, 'protection_failed', error instanceof Error ? error.message : '接入未完成。') }
       })
+      handle('privacy:protection-remove', async () => {
+        if (!protection) throw new GatewayError(503, 'protection_unavailable', '接入服务尚未就绪。')
+        try { const result = await protection.remove(); shutdownError = undefined; return result }
+        catch (error) { throw new GatewayError(503, 'removal_failed', error instanceof Error ? error.message : '移除尚未完成。') }
+      })
       handle('privacy:record', (id: string, reveal: boolean) => {
         if (typeof id !== 'string' || typeof reveal !== 'boolean') throw new Error('参数有误。')
         return gateway.records.detail(id, reveal)
@@ -176,6 +200,7 @@ else {
         if (!Object.hasOwn(SOURCE_URLS, topic)) throw new Error('参数有误。')
         return shell.openExternal(SOURCE_URLS[topic])
       })
+      handle('privacy:help', () => shell.openExternal('https://github.com/yushxzh/ai-privacy-gateway/blob/main/docs/USAGE.md'))
       gateway.on('change', () => {
         protection?.observe(gateway.snapshot().records)
         if (window && !window.webContents.isDestroyed()) window.webContents.send('privacy:changed')
@@ -185,6 +210,7 @@ else {
       const executable = process.env.APG_HTTPS_RUNTIME || nativeExecutable(app.isPackaged ? process.resourcesPath : join(__dirname, '../../resources'))
       const available = !isolated && !!executable && existsSync(executable)
       const caDirectory = join(app.getPath('userData'), 'native-https/ca')
+      const certificate = new CertificateStore(caDirectory)
       const proxySettings = new WorkBuddyProxySettings(
         join(isolated ? process.env.APG_TEST_USER_DATA! : homedir(), '.workbuddy-ai/settings.json'),
         join(app.getPath('userData'), 'native-https/connection.json'))
@@ -200,8 +226,10 @@ else {
       protection = new WorkBuddyProtection(proxySettings, {
         client: new WorkBuddyProcess(isolated ? 'linux' : process.platform),
         proxy: nativeProxy ?? { running: false, async start() { throw new Error('运行时未安装。') }, async stop() {} },
-        checkCertificate: () => checkUserCertificate(caDirectory),
-        installCertificate: () => installUserCertificate(join(caDirectory, 'mitmproxy-ca-cert.pem'))
+        checkCertificate: async () => { await certificate.remember(); return checkUserCertificate(caDirectory) },
+        installCertificate: () => installUserCertificate(join(caDirectory, 'mitmproxy-ca-cert.pem')),
+        certificatePresent: () => certificate.present(),
+        removeCertificate: async () => { if (!isolated) await waitForNativeProxyExit(); await certificate.remove() }
       }, available)
       protection.on('change', () => { if (window && !window.webContents.isDestroyed()) window.webContents.send('privacy:changed') })
       await protection.initialize()

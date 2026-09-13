@@ -27,7 +27,7 @@ test('端口占用或运行时不存在时不能显示 HTTPS 保护已启动', a
   assert.ok(python)
   const ca = await mkdtemp(join(tmpdir(), 'apg-tls-failure-'))
   t.after(() => rm(ca, { recursive: true, force: true }))
-  const server = createServer()
+  const server = createServer(socket => socket.end())
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())))
   const address = server.address()
@@ -40,19 +40,36 @@ test('端口占用或运行时不存在时不能显示 HTTPS 保护已启动', a
   }
 })
 
-test('桌面检查入口消失后，TLS 进程自动退出释放端口', async t => {
+test('桌面崩溃后立即重开，等待旧 TLS 进程退出并恢复同一端口', async t => {
   const python = process.env.APG_TEST_PYTHON
   assert.ok(python)
   const ca = await mkdtemp(join(tmpdir(), 'apg-orphan-check-'))
+  const reservation = createServer()
+  await new Promise<void>(resolve => reservation.listen(0, '127.0.0.1', resolve))
+  const address = reservation.address()
+  assert.ok(address && typeof address !== 'string')
+  const port = address.port
+  await new Promise<void>(resolve => reservation.close(() => resolve()))
+  const executable = process.env.APG_TEST_MITMDUMP || join(dirname(python), 'mitmdump')
   const bridge = new NativeBridge(new RecordStore())
   await bridge.start()
-  const child = spawn(process.env.APG_TEST_MITMDUMP || join(dirname(python), 'mitmdump'),
-    ['--listen-host', '127.0.0.1', '--listen-port', '0', '--set', `confdir=${ca}`, '-s', resolve('src/https/workbuddy.py')],
+  const child = spawn(executable,
+    ['--listen-host', '127.0.0.1', '--listen-port', String(port), '--set', `confdir=${ca}`, '-s', resolve('src/https/workbuddy.py')],
     { stdio: 'ignore', env: { ...process.env, APG_NATIVE_BRIDGE_URL: bridge.url, APG_NATIVE_BRIDGE_TOKEN: bridge.token } })
   const exited = new Promise<void>((resolveExit, reject) => { child.once('exit', () => resolveExit()); child.once('error', reject) })
-  t.after(async () => { if (child.exitCode === null) child.kill(); await bridge.stop(); await rm(ca, { recursive: true, force: true }) })
+  const replacement = new NativeProxy(new RecordStore(), executable, resolve('src/https/workbuddy.py'), ca, port)
+  t.after(async () => {
+    await replacement.stop()
+    if (child.exitCode === null) child.kill()
+    await exited
+    await bridge.stop()
+    await rm(ca, { recursive: true, force: true })
+  })
   await bridge.waitUntilReady()
   await bridge.stop()
+  assert.equal(child.exitCode, null)
+  await replacement.start()
+  assert.equal(replacement.running, true)
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([exited, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('孤立 TLS 进程未退出。')), 12000) })])

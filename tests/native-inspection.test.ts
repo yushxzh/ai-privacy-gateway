@@ -68,3 +68,32 @@ test('独立检查入口拒绝浏览器和无令牌调用，正常请求记录�
   assert.equal(store.counts().total, 1)
   assert.equal(JSON.stringify(store.summaries()).includes(bridge.token), false)
 })
+
+test('未检查与格式失败记录不计为规则放行或规则阻断，不保存原文', () => {
+  const records = new RecordStore()
+  const service = new NativeInspection(records)
+  service.unchecked('unsupported')
+  service.unchecked('outside-scope')
+  service.unchecked('check-failed')
+  assert.deepEqual(records.counts(), { total: 3, masked: 0, blocked: 0, allowed: 0, unchecked: 3 })
+  for (const summary of records.summaries()) {
+    assert.equal(summary.outbound, undefined)
+    assert.equal(records.detail(summary.id, true)?.original, '')
+    assert.equal(records.detail(summary.id, true)?.sanitized, '')
+  }
+  records.clear()
+  assert.equal(records.counts().unchecked, 0)
+})
+
+test('大量范围外流量不挤出在途模型请求，累计计数仍包含每次观察', async () => {
+  const records = new RecordStore()
+  const service = new NativeInspection(records)
+  const pending = await service.inspect(request('hello'))
+  for (let i = 0; i < 200; i++) service.unchecked('outside-scope')
+  assert.equal(records.summaries().length, 21)
+  assert.equal(records.counts().total, 201)
+  assert.equal(records.counts().unchecked, 200)
+  assert.equal(records.detail(pending.id, false)?.status, 'pending')
+  service.close()
+  assert.equal(records.detail(pending.id, false)?.status, 'failed')
+})

@@ -40,6 +40,7 @@ export interface RecordSummary {
   ruleMatches?: import('./rule-settings').RuleMatch[]
   rulesRevision?: number
   transport?: 'https-proxy'
+  inspectionIssue?: 'unsupported' | 'outside-scope' | 'check-failed'
   outbound?: {
     sha256: string
     bytes: number
@@ -70,7 +71,7 @@ export interface Snapshot {
   settings: Settings
   hasApiKey: boolean
   records: RecordSummary[]
-  counters: { total: number; masked: number; blocked: number; allowed: number }
+  counters: { total: number; masked: number; blocked: number; allowed: number; unchecked: number }
 }
 
 export interface WorkBuddyConfiguration {
@@ -106,7 +107,9 @@ export interface IntegrationGuide {
 
 export interface DesktopAPI {
   readonly platform: string
+  readonly version: string
   setProtection(enabled: boolean): Promise<import('./protection').ProtectionSnapshot>
+  removeProtection(): Promise<import('./protection').ProtectionSnapshot>
   snapshot(): Promise<Snapshot>
   record(id: string, reveal: boolean): Promise<RecordDetail | null>
   clearRecords(): Promise<void>
@@ -116,6 +119,7 @@ export interface DesktopAPI {
   guide(client: ClientKind, shell: ShellKind): Promise<IntegrationGuide>
   copy(text: string): Promise<void>
   openDocs(topic: ClientKind): Promise<void>
+  openHelp(): Promise<void>
   workbuddyConfiguration(): Promise<WorkBuddyConfiguration>
   setWorkbuddyModel(id: string, enabled: boolean): Promise<WorkBuddyConfiguration>
   inspectRules(text: string): Promise<RuleTestResult>

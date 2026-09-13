@@ -168,6 +168,42 @@ export class WorkBuddyConnections {
     return next
   }
 
+  restoreAll(): Promise<void> {
+    const next = this.updates.then(async () => {
+      const saved = await this.saved()
+      let document: Awaited<ReturnType<typeof readDocument>>
+      try { document = await readDocument(this.configPath) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+          throw new GatewayError(409, 'workbuddy_config_invalid', 'WorkBuddy 模型配置无法读取，请先恢复配置后再卸载。')
+        await rm(this.statePath, { force: true })
+        return
+      }
+      const rows = document.models.filter(isCustomModel)
+      let changed = false
+      for (const model of rows) {
+        const token = localToken(model.url)
+        if (!token) continue
+        if (rows.filter(row => row.id === model.id).length !== 1)
+          throw new GatewayError(409, 'workbuddy_duplicate_model', '模型 ID 重复，请在 WorkBuddy 恢复原模型地址后再卸载。')
+        const source = saved.find(row => row.id === model.id && row.token === token)
+        if (!source) throw new GatewayError(409, 'workbuddy_source_missing', '模型原连接资料缺失，请在 WorkBuddy 恢复原模型地址后再卸载。')
+        model.url = source.url
+        for (const key of capabilityKeys) {
+          if (model[key] !== applied[key]) continue
+          if (key in source.capabilities) model[key] = source.capabilities[key]
+          else delete model[key]
+        }
+        changed = true
+      }
+      if (changed) await writeAtomic(this.configPath, document.data, document.raw)
+      await rm(this.statePath, { force: true })
+      this.gateway.setWorkbuddyRoutes([])
+    })
+    this.updates = next.catch(() => {})
+    return next
+  }
+
   private async change(id: string, enabled: boolean): Promise<WorkBuddyConfiguration> {
     if (typeof id !== 'string' || typeof enabled !== 'boolean') throw new Error('invalid-argument')
     const { raw, data, models } = await readDocument(this.configPath)

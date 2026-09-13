@@ -8,6 +8,8 @@ interface Services {
   proxy: { running: boolean; start(): Promise<void>; stop(): Promise<void> }
   checkCertificate(): Promise<boolean>
   installCertificate(): Promise<void>
+  certificatePresent(): Promise<boolean>
+  removeCertificate(): Promise<void>
 }
 
 /** 配置写入与客户端重启是一项操作；恢复失败时保留代理和恢复资料。 */
@@ -15,31 +17,43 @@ export class WorkBuddyProtection extends EventEmitter {
   private value: ProtectionSnapshot
   private busy = false
   private connectedAt = 0
+  private inspectionFailed = false
   constructor(private config: WorkBuddyProxySettings, private services: Services, available: boolean) {
     super()
     this.value = { state: 'off', available, managed: false, clientInstalled: false,
-      certificateTrusted: false, message: '尚未开启 WorkBuddy 保护。' }
+      certificateTrusted: false, certificatePresent: false, message: '尚未开启 WorkBuddy 保护。' }
   }
   snapshot(): ProtectionSnapshot { return { ...this.value } }
   runtimeChanged(): void {
-    if (!this.busy && ['configured', 'verified'].includes(this.value.state) && !this.services.proxy.running)
+    if (!this.busy && (['configured', 'verified'].includes(this.value.state) || this.inspectionFailed) && !this.services.proxy.running) {
+      this.inspectionFailed = false
       this.update({ state: 'error', lastVerifiedAt: undefined, message: '本地代理已停止，当前连接不可用。请重试开启，或停止并恢复原连接。' })
+    }
   }
   configurationChanged(): void {
     if (this.busy || !this.value.managed) return
     try {
-      if (!this.config.isConnected()) this.update({ state: 'error', lastVerifiedAt: undefined,
-        message: 'WorkBuddy 的代理设置已改变。点击「停止并恢复」保留新设置，或重新开启保护。' })
-    } catch { this.update({ state: 'error', message: '无法读取 WorkBuddy 代理设置，请检查本地配置。' }) }
+      if (!this.config.isConnected()) {
+        this.inspectionFailed = false
+        this.update({ state: 'error', lastVerifiedAt: undefined,
+          message: 'WorkBuddy 的代理设置已改变。点击「停止并恢复」保留新设置，或重新开启保护。' })
+      }
+    } catch {
+      this.inspectionFailed = false
+      this.update({ state: 'error', lastVerifiedAt: undefined, message: '无法读取 WorkBuddy 代理设置，请检查本地配置。' })
+    }
   }
   private update(value: Partial<ProtectionSnapshot>): void { Object.assign(this.value, value); this.emit('change') }
   async initialize(): Promise<void> {
     this.update({ clientInstalled: !!await this.services.client.executable().catch(() => undefined) })
-    if (!this.value.available) { this.update({ message: '此构建未包含本地代理运行时，请使用完整安装包。' }); return }
+    this.update({ certificatePresent: await this.services.certificatePresent().catch(() => true) })
     // 上次异常退出后优先恢复同一端口，避免把客户端留在无服务的代理上。
     let hasBackup = false
     try { hasBackup = !!this.config.backup() }
     catch { this.update({ state: 'error', managed: true, message: '接入恢复资料损坏，请按仓库使用文档恢复连接。' }); return }
+    if (!this.value.available) {
+      this.update({ managed: hasBackup, state: hasBackup ? 'error' : 'off', message: '此构建未包含本地代理运行时，请使用完整安装包。已有接入仍可停止恢复或移除。' }); return
+    }
     if (hasBackup) {
       this.update({ managed: true })
       let connected = false
@@ -57,9 +71,18 @@ export class WorkBuddyProtection extends EventEmitter {
     }
   }
   observe(records: RecordSummary[]): void {
-    if (!['configured', 'verified'].includes(this.value.state)) return
-    const verified = records.find(record => record.transport === 'https-proxy' && Date.parse(record.time) >= this.connectedAt
-      && record.status === 'completed' && record.outbound?.authenticationUnchanged && record.outbound.originalsAbsent)
+    if (this.busy || !this.services.proxy.running || (!['configured', 'verified'].includes(this.value.state) && !this.inspectionFailed)) return
+    const latest = records.find(record => record.transport === 'https-proxy' && Date.parse(record.time) >= this.connectedAt
+      && record.inspectionIssue !== 'outside-scope')
+    if (latest?.inspectionIssue || latest?.status === 'failed') {
+      this.inspectionFailed = true
+      this.update({ state: 'error', lastVerifiedAt: undefined, message: latest.inspectionIssue
+        ? '最近模型请求未完成检查，已停止外发。请查看记录中的原因后重试。'
+        : '最近模型请求未成功完成，请查看记录中的原因后重试。' })
+      return
+    }
+    const verified = latest?.status === 'completed' && latest.outbound?.authenticationUnchanged && latest.outbound.originalsAbsent ? latest : undefined
+    if (verified) this.inspectionFailed = false
     if (verified && verified.time !== this.value.lastVerifiedAt) this.update({ state: 'verified', lastVerifiedAt: verified.time,
       message: '已验证请求经过本地检查，原登录认证保持不变。' })
   }
@@ -67,6 +90,7 @@ export class WorkBuddyProtection extends EventEmitter {
     if (this.busy) throw new Error('接入操作正在进行，请稍候。')
     if (!this.value.available) throw new Error(this.value.message)
     this.busy = true
+    this.inspectionFailed = false
     this.update({ state: 'starting', message: '正在检查代理和证书…', lastVerifiedAt: undefined })
     let closed = false
     let touched = false
@@ -78,7 +102,7 @@ export class WorkBuddyProtection extends EventEmitter {
         await this.services.installCertificate()
         if (!await this.services.checkCertificate()) throw new Error('证书信任验证未通过，尚未改变 WorkBuddy 设置。')
       }
-      this.update({ certificateTrusted: true, message: '正在保存原代理设置并重启 WorkBuddy…' })
+      this.update({ certificateTrusted: true, certificatePresent: true, message: '正在保存原代理设置并重启 WorkBuddy…' })
       closed = await this.services.client.close()
       touched = true
       this.config.apply()
@@ -102,29 +126,60 @@ export class WorkBuddyProtection extends EventEmitter {
         : '接入未完成，恢复资料与代理已保留。请关闭 WorkBuddy 后点击「停止并恢复」。'
       let managed = true
       try { managed = !!this.config.backup() } catch {}
-      this.update({ state: 'error', managed, message })
+      this.update({ state: 'error', managed, certificatePresent: await this.services.certificatePresent().catch(() => true), message })
       throw new Error(message)
     } finally { this.busy = false }
     return this.snapshot()
   }
+  private async restoreConnection(): Promise<string> {
+    if (!this.config.backup()) return 'WorkBuddy 保护已停止。'
+    const wasRunning = await this.services.client.close()
+    const restored = this.config.restore()
+    if (wasRunning) await this.services.client.open()
+    this.config.finishRestore()
+    return restored === 'external-change' ? '已保留后来修改的代理设置。' : 'WorkBuddy 原代理设置已恢复。'
+  }
+
   async disable(): Promise<ProtectionSnapshot> {
     if (this.busy) throw new Error('接入操作正在进行，请稍候。')
     this.busy = true
+    this.inspectionFailed = false
     this.update({ state: 'stopping', message: '正在恢复 WorkBuddy 原连接…' })
     try {
-      if (this.config.backup()) {
-        const wasRunning = await this.services.client.close()
-        const restored = this.config.restore()
-        if (wasRunning) await this.services.client.open()
-        this.config.finishRestore()
-        this.update({ message: restored === 'external-change' ? '已保留后来修改的代理设置。' : 'WorkBuddy 原代理设置已恢复。' })
-      } else this.update({ message: 'WorkBuddy 保护已停止。' })
+      this.update({ message: await this.restoreConnection() })
       await this.services.proxy.stop()
       this.update({ state: 'off', managed: false, lastVerifiedAt: undefined })
     } catch {
       let managed = true
       try { managed = !!this.config.backup() } catch {}
       this.update({ state: 'error', managed, message: '恢复尚未完成，代理仍保留。请关闭 WorkBuddy 后重试「停止并恢复」。' })
+      throw new Error(this.value.message)
+    } finally { this.busy = false }
+    return this.snapshot()
+  }
+
+  async remove(): Promise<ProtectionSnapshot> {
+    if (this.busy) throw new Error('接入操作正在进行，请稍候。')
+    this.busy = true
+    this.inspectionFailed = false
+    this.update({ state: 'removing', lastVerifiedAt: undefined, message: '正在恢复原连接并移除证书…' })
+    let closed = false
+    try {
+      // 证书撤销后再重开客户端，避免它继续使用重启前缓存的 CA。
+      closed = await this.services.client.close()
+      this.config.restore()
+      await this.services.proxy.stop()
+      await this.services.removeCertificate()
+      if (closed) { await this.services.client.open(); closed = false }
+      this.config.finishRestore()
+      this.update({ state: 'off', managed: false, certificateTrusted: false, certificatePresent: false,
+        message: '原生接入、证书信任与私钥已移除。再次开启时会重新申请授权。' })
+    } catch (error) {
+      if (closed) await this.services.client.open().catch(() => {})
+      let managed = true
+      try { managed = !!this.config.backup() } catch {}
+      this.update({ state: 'error', managed, certificatePresent: await this.services.certificatePresent().catch(() => true),
+        message: error instanceof Error ? error.message : '移除尚未完成，已保留恢复资料，请重试。' })
       throw new Error(this.value.message)
     } finally { this.busy = false }
     return this.snapshot()

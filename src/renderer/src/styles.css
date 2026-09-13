@@ -1250,6 +1250,23 @@ textarea::placeholder {
   padding: 23px 20px;
   color: #537d4b;
 }
+.privacy-settings + .privacy-settings {
+  margin-top: 16px;
+}
+.certificate-settings p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.certificate-settings small {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+}
+.certificate-settings .button + .button {
+  margin-left: 6px;
+}
 .privacy-settings h3 {
   margin: 12px 0;
   font-weight: 600;

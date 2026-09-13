@@ -4,6 +4,8 @@ import { NativeBridge } from '../gateway/native-bridge'
 import type { RecordStore } from '../gateway/records'
 import { EventEmitter } from 'node:events'
 import { RuleSettings } from '../privacy/rule-settings'
+import { access } from 'node:fs/promises'
+import { waitForNativeProxyExit } from './native-runtime'
 
 /** 本地 TLS 进程；证书授权和客户端配置由接入协调器管理。 */
 export class NativeProxy extends EventEmitter {
@@ -19,11 +21,13 @@ export class NativeProxy extends EventEmitter {
     if (this.running) return
     if (this.child) await this.stop()
     if (![this.executable,this.addon,this.caDirectory].every(isAbsolute)) throw new Error('HTTPS 运行时路径必须是绝对路径。')
+    await access(this.executable)
+    if (this.port !== 0) await waitForNativeProxyExit(this.port)
     await this.bridge.start()
     try {
       const child = spawn(this.executable, ['--listen-host','127.0.0.1','--listen-port',String(this.port),
         '--set',`confdir=${this.caDirectory}`,'--allow-hosts','^www\\.workbuddy\\.ai:443$',
-        '--set','ssl_insecure=false','--set','termlog_verbosity=error','--set','flow_detail=0','-s',this.addon],
+        '--set','ssl_insecure=false','--set','body_size_limit=4m','--set','termlog_verbosity=error','--set','flow_detail=0','-s',this.addon],
         { stdio: 'ignore', env: { ...process.env, APG_NATIVE_BRIDGE_URL: this.bridge.url, APG_NATIVE_BRIDGE_TOKEN: this.bridge.token } })
       this.child = child
       this.exited = new Promise(resolve => {
