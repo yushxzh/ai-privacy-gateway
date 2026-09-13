@@ -9,9 +9,9 @@ test('卸载先恢复全部模型和代理，撤销证书后重开客户端，�
   const config = { restore() { events.push('proxy'); return 'restored' as const }, finishRestore() { events.push('finish') } }
   const models = { async restoreAll() { events.push('models') } }
   const certificate = { async remove() { events.push('certificate') } }
-  const client = { async close() { events.push('close'); return true }, async open() { events.push('open') } }
+  const client = { async close() { events.push('close'); return true }, async open() { events.push('open') }, async clearCertificateCache() { events.push('cache') } }
   await prepareUninstall(config, models, certificate, client)
-  assert.deepEqual(events, ['close', 'models', 'proxy', 'certificate', 'open', 'finish'])
+  assert.deepEqual(events, ['close', 'cache', 'models', 'proxy', 'certificate', 'open', 'finish'])
 })
 
 test('卸载撤销失败仍重开原客户端并保留备份；客户端拒绝关闭时不修改连接', async () => {
@@ -19,13 +19,27 @@ test('卸载撤销失败仍重开原客户端并保留备份；客户端拒绝�
   const config = { restore() { events.push('proxy'); return 'restored' as const }, finishRestore() { events.push('finish') } }
   const models = { async restoreAll() { events.push('models') } }
   const certificate = { async remove() { events.push('certificate'); throw new Error('synthetic denied') } }
-  const client = { async close() { events.push('close'); return true }, async open() { events.push('open') } }
+  const client = { async close() { events.push('close'); return true }, async open() { events.push('open') }, async clearCertificateCache() { events.push('cache') } }
   await assert.rejects(prepareUninstall(config, models, certificate, client), /synthetic denied/)
-  assert.deepEqual(events, ['close', 'models', 'proxy', 'certificate', 'open'])
+  assert.deepEqual(events, ['close', 'cache', 'models', 'proxy', 'certificate', 'open'])
   events.length = 0
   client.close = async () => { throw new Error('synthetic busy') }
   await assert.rejects(prepareUninstall(config, models, certificate, client), /synthetic busy/)
   assert.deepEqual(events, [])
+})
+
+test('卸载遇到客户端证书缓存刷新失败时重开客户端，保留证书、连接和恢复资料', async () => {
+  const events: string[] = []
+  const config = { restore() { events.push('proxy'); return 'restored' as const }, finishRestore() { events.push('finish') } }
+  const models = { async restoreAll() { events.push('models') } }
+  const certificate = { async remove() { events.push('certificate') } }
+  const client = {
+    async close() { events.push('close'); return true },
+    async clearCertificateCache() { events.push('cache'); throw new Error('synthetic cache failure') },
+    async open() { events.push('open') }
+  }
+  await assert.rejects(prepareUninstall(config, models, certificate, client), /synthetic cache failure/)
+  assert.deepEqual(events, ['close', 'cache', 'open'])
 })
 
 test('等待旧代理释放真实端口后才允许清理', async t => {

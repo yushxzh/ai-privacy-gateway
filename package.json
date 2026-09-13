@@ -1,6 +1,6 @@
 {
   "name": "ai-privacy-gateway",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "本机 AI 请求检测、替换和审计桌面应用",
   "license": "MIT",

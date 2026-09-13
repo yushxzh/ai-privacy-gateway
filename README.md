@@ -8,7 +8,7 @@ AI Privacy Gateway 是面向 macOS 和 Windows 的开源桌面隐私网关。项
 
 [开始使用](#开始使用) · [支持范围](#支持范围) · [路线图](#路线图) · [全局 PRD](docs/PRD.md) · [开发指南](docs/DEVELOPMENT.md)
 
-> **当前版本：0.1.7 · M1 预览版。** 提供 macOS arm64 / x64 和 Windows x64 安装包；Windows 实机验证按本轮决定后置。完整 Agent、跨轮映射和流式还原属于 M2，语义分类暂缓。预览包未正式签名或公证，具体证据见 [M1 交付记录](docs/M1-DELIVERY.md)。
+> **当前版本：0.1.8 · M1 预览版。** 修复更换证书后 WorkBuddy 仍使用旧缓存而无法连接的问题。提供 macOS arm64 / x64 和 Windows x64 安装包；Windows 实机验证按本轮决定后置。完整 Agent、跨轮映射和流式还原属于 M2，语义分类暂缓。预览包未正式签名或公证，具体证据见 [用户验收记录](docs/UAT-0.1.8.md)。
 
 ## 可以做什么
 
@@ -37,7 +37,7 @@ flowchart LR
 
 ## 开始使用
 
-安装包位于 [0.1.7 Release](https://github.com/yushxzh/ai-privacy-gateway/releases/tag/v0.1.7)，按系统和架构选择 DMG / ZIP 或 Windows EXE；同页提供 SHA-256 校验清单。完整包无需安装 Node.js 或 Python。安装、证书授权与卸载步骤见 [使用指南](docs/USAGE.md)。
+安装包位于 [0.1.8 Release](https://github.com/yushxzh/ai-privacy-gateway/releases/tag/v0.1.8)，按系统和架构选择 DMG / ZIP 或 Windows EXE；同页提供 SHA-256 校验清单。完整包无需安装 Node.js 或 Python。安装、证书授权与卸载步骤见 [使用指南](docs/USAGE.md)。
 
 从源码开发需要 **Git、Node.js 22.12+ 和 npm**，推荐 Node.js 24：
 
@@ -86,7 +86,7 @@ npm run dev
 | 阶段 | 主要交付 | 完成条件 | 状态 |
 | --- | --- | --- | --- |
 | M0 · 基础 MVP | 桌面 App、规则与记录、WorkBuddy 一键接入、MIT 开源 | macOS 限定文本路径通过验收，源码可获取 | 已完成，版本 0.1.6 |
-| M1 · 可靠的双平台预览版 | 请求覆盖、异常恢复、证书撤销、界面整理及三个架构安装包 | 按声明范围验收；Windows 实机后置 | 0.1.7 交付中 |
+| M1 · 可靠的双平台预览版 | 请求覆盖、异常恢复、证书撤销、界面整理及三个架构安装包 | 按声明范围验收；Windows 实机后置 | 0.1.8 预览版，剩余验收见 M1 记录 |
 | M2 · 原订阅 Agent 任务 | 完整工具循环、会话映射、流式恢复；优先 Codex，再推进 Claude Code | 原登录、原模型、原权益与受保护任务同时验证 | 待开发 |
 | M3 · 更多客户端与检测能力 | 其余七个客户端逐项适配，扩展 PII / NER、规则更新与效果评测 | 每个客户端、每类检测都有独立验收证据 | 待开发；语义分类暂缓 |
 | M4 · 高级本地与开发者能力 | 显式策略路由、加密历史、隐私报告、Embeddings、CLI / SDK / Docker | 默认数据边界不变，新增能力单独验收 | 规划中 |
@@ -104,7 +104,7 @@ npm run test:desktop   # 真实 Electron 窗口交互测试
 npm run pack           # 构建当前平台的应用目录
 ```
 
-0.1.7 已有 147 项核心检查通过；macOS arm64 与 Rosetta 上的 x64 运行时各通过 5 项原生检查，真实 WorkBuddy 文本请求也已完成过滤。桌面、安装和系统授权的最终证据分别记录，不外推 Windows 实机或完整 Agent。复现命令见 [开发指南](docs/DEVELOPMENT.md)，完整结果见 [M1 交付记录](docs/M1-DELIVERY.md)。
+0.1.8 修复代码通过 152 项核心检查和 4 个桌面场景；两个 macOS 应用包首开通过，当前用户的实际安装、旧证书缓存自动刷新、真实文本替换、停止及退出恢复已完成。原生协议与适配器未改动，本轮此前两个架构各 5 项原生检查的证据单独保留。全新系统用户、Windows 实机和完整 Agent 不由这些结果推定通过。复现命令见 [开发指南](docs/DEVELOPMENT.md)，完整结果见 [用户验收记录](docs/UAT-0.1.8.md)。
 
 ## 文档与贡献
 

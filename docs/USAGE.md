@@ -1,6 +1,6 @@
 # WorkBuddy 一键接入
 
-适用版本：0.1.7 预览版。验收证据见 [M1 交付记录](M1-DELIVERY.md)。Windows 按本轮决定提供安装包，实机验证后置；语义分类继续暂缓。
+适用版本：0.1.8 预览版。验收证据见 [用户验收记录](UAT-0.1.8.md)。Windows 按本轮决定提供安装包，实机验证后置；语义分类继续暂缓。
 
 ## 操作
 
@@ -11,7 +11,9 @@
 5. 发送完成后回到网关。状态变为「已验证」时，表示本次接入后已有请求通过正文检查，且原官方服务返回成功。
 6. 查看「记录」中的替换内容、命中规则和正文校验。模型回复内容不能单独作为是否过滤的依据。
 
-安装包见 [GitHub Release](https://github.com/yushxzh/ai-privacy-gateway/releases/tag/v0.1.7)。macOS Apple Silicon 选择 `mac-arm64.dmg`，Intel 选择 `mac-x64.dmg`，打开后将应用拖入「应用程序」；另提供 ZIP。Windows x64 选择 `win-x64.exe`，安装到当前用户。完整文件名以 `AI-Privacy-Gateway-0.1.7-` 开头；使用同页 `SHA256SUMS.txt` 核对下载文件。完整包无需另装 Node.js 或 Python。
+安装包见 [GitHub Release](https://github.com/yushxzh/ai-privacy-gateway/releases/tag/v0.1.8)。macOS Apple Silicon 选择 `mac-arm64.dmg`，Intel 选择 `mac-x64.dmg`，打开后将应用拖入「应用程序」；另提供 ZIP。Windows x64 选择 `win-x64.exe`，安装到当前用户。完整文件名以 `AI-Privacy-Gateway-0.1.8-` 开头；使用同页 `SHA256SUMS.txt` 核对下载文件。完整包无需另装 Node.js 或 Python。
+
+如果 0.1.7 在移除证书、重新授权后仍提示无法建立安全连接，请升级到 0.1.8 后重新开启保护。新版本会刷新 WorkBuddy 的旧证书缓存，不需要手动关闭证书校验。
 
 此预览版没有正式签名、公证或自动更新，系统可能要求确认来源。安装包构建与实机验收分别记录。
 

@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { access } from 'node:fs/promises'
+import { access, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -16,7 +16,12 @@ export async function powershell(script: string): Promise<string> {
 }
 
 export class WorkBuddyProcess {
-  constructor(private platform = process.platform) {}
+  constructor(private platform = process.platform, private configDirectory = join(homedir(), '.workbuddy-ai')) {}
+  async clearCertificateCache(): Promise<void> {
+    // WorkBuddy 会跨重启复用此派生文件；证书变更后必须让客户端从系统重新生成。
+    try { await rm(join(this.configDirectory, 'system-ca-bundle.pem'), { force: true }) }
+    catch { throw new Error('无法刷新 WorkBuddy 的证书缓存，请检查文件权限后重试。') }
+  }
   async executable(): Promise<string | undefined> {
     const candidates = this.platform === 'darwin'
       ? ['/Applications/WorkBuddy AI.app', join(homedir(), 'Applications/WorkBuddy AI.app')]

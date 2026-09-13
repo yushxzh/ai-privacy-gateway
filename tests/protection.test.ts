@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkBuddyProxySettings, WORKBUDDY_PROXY } from '../src/main/workbuddy-proxy-settings'
 import { WorkBuddyProtection } from '../src/main/protection'
 import { nativeExecutable } from '../src/main/native-runtime'
-import { macWorkBuddyPath } from '../src/main/workbuddy-process'
+import { macWorkBuddyPath, WorkBuddyProcess } from '../src/main/workbuddy-process'
 import type { RecordSummary } from '../src/shared/types'
 
 function setup(t: { after(fn: () => void): void }, original: Record<string, unknown> = {}) {
@@ -17,33 +17,86 @@ function setup(t: { after(fn: () => void): void }, original: Record<string, unkn
   const config = new WorkBuddyProxySettings(path, join(dir, 'backup.json'))
   const read = () => JSON.parse(readFileSync(path, 'utf8'))
   const events: string[] = []
-  let running = true, trusted = true, present = true, failOpen = 0, failClose = false, failStart = false, installs = true, failRemove = false
+  let running = true, trusted = true, present = true, failOpen = 0, failClose = false, failStart = false, installs = true, failRemove = false, failCache = false
   const proxy = { running: false,
     async start() { events.push('start'); if (failStart) throw new Error('端口占用。'); this.running = true },
     async stop() { events.push('stop'); this.running = false } }
   const services = { proxy, client: {
     async executable() { return '/synthetic/WorkBuddy' },
     async close() { events.push('close'); if (failClose) throw new Error('请先关闭 WorkBuddy。'); const result = running; running = false; return result },
+    async clearCertificateCache() { events.push('cache'); if (failCache) throw new Error('证书缓存无法刷新。') },
     async open() { events.push('open'); if (failOpen > 0) { failOpen--; throw new Error('启动失败。') }; running = true }
   }, async checkCertificate() { events.push('trust'); return trusted },
   async installCertificate() { events.push('install'); if (!installs) throw new Error('授权取消。'); trusted = true; present = true },
   async certificatePresent() { return present },
   async removeCertificate() { events.push('remove'); if (failRemove) throw new Error('证书撤销取消。'); trusted = false; present = false } }
   const protection = new WorkBuddyProtection(config, services, true)
-  return { config, path, read, events, proxy, protection, services,
-    set: (value: { running?: boolean; trusted?: boolean; failOpen?: number; failClose?: boolean; failStart?: boolean; installs?: boolean; failRemove?: boolean }) => {
+  return { dir, config, path, read, events, proxy, protection, services,
+    set: (value: { running?: boolean; trusted?: boolean; failOpen?: number; failClose?: boolean; failStart?: boolean; installs?: boolean; failRemove?: boolean; failCache?: boolean }) => {
       running = value.running ?? running; trusted = value.trusted ?? trusted; failOpen = value.failOpen ?? failOpen
       failClose = value.failClose ?? failClose; failStart = value.failStart ?? failStart; installs = value.installs ?? installs
       failRemove = value.failRemove ?? failRemove
+      failCache = value.failCache ?? failCache
     } }
 }
+
+test('证书刷新只使派生缓存失效，保留模型、设置及用户附加证书，重复刷新可用', async t => {
+  const f = setup(t, { theme: 'light', auth: 'synthetic-only' })
+  const cache = join(f.dir, 'system-ca-bundle.pem')
+  writeFileSync(cache, 'synthetic-old-root')
+  writeFileSync(join(f.dir, 'ca.pem'), 'synthetic-user-certificate')
+  writeFileSync(join(f.dir, 'models.json'), '{"model":"synthetic"}')
+  const client = new WorkBuddyProcess('linux', f.dir)
+  await client.clearCertificateCache()
+  assert.equal(existsSync(cache), false)
+  assert.deepEqual(f.read(), { theme: 'light', auth: 'synthetic-only' })
+  assert.equal(readFileSync(join(f.dir, 'ca.pem'), 'utf8'), 'synthetic-user-certificate')
+  assert.equal(readFileSync(join(f.dir, 'models.json'), 'utf8'), '{"model":"synthetic"}')
+  await client.clearCertificateCache()
+})
+
+test('证书缓存路径异常时明确失败，不递归删除其中的文件', async t => {
+  const f = setup(t)
+  const cache = join(f.dir, 'system-ca-bundle.pem')
+  mkdirSync(cache)
+  const preserved = join(cache, 'preserved.txt')
+  writeFileSync(preserved, 'synthetic-preserved')
+  await assert.rejects(new WorkBuddyProcess('linux', f.dir).clearCertificateCache(), /无法刷新 WorkBuddy 的证书缓存/)
+  assert.equal(readFileSync(preserved, 'utf8'), 'synthetic-preserved')
+})
+
+test('开启时缓存刷新失败会重开原客户端，不接管配置或留下代理', async t => {
+  const f = setup(t, { theme: 'light' }); f.set({ failCache: true })
+  await assert.rejects(f.protection.enable(), /证书缓存无法刷新/)
+  assert.deepEqual(f.events, ['start', 'trust', 'close', 'cache', 'open', 'stop'])
+  assert.deepEqual(f.read(), { theme: 'light' })
+  assert.equal(f.config.backup(), undefined)
+  assert.equal(f.proxy.running, false)
+})
+
+test('移除前刷新缓存，客户端已关闭时仍处理；刷新失败保留证书且可以重试', async t => {
+  for (const running of [true, false]) {
+    const f = setup(t, { theme: 'light' }); await f.protection.enable()
+    f.events.length = 0; f.set({ running, failCache: true })
+    await assert.rejects(f.protection.remove(), /证书缓存无法刷新/)
+    assert.deepEqual(f.events, running ? ['close', 'cache', 'open'] : ['close', 'cache'])
+    assert.equal(f.config.isConnected(), true)
+    assert.equal(f.proxy.running, true)
+    assert.equal(f.protection.snapshot().certificatePresent, true)
+    f.set({ failCache: false })
+    await f.protection.remove()
+    assert.deepEqual(f.read(), { theme: 'light' })
+    assert.equal(f.config.backup(), undefined)
+    assert.equal(f.protection.snapshot().certificatePresent, false)
+  }
+})
 
 test('开启保存原代理，认证及无关设置不变，恢复保留后来的无关改动', async t => {
   const original = { 'http.proxy': 'http://127.0.0.1:9988', 'http.proxySupport': 'override', language: 'zh', auth: 'synthetic-only' }
   const f = setup(t, original)
   await f.protection.initialize()
   assert.equal((await f.protection.enable()).state, 'configured')
-  assert.deepEqual(f.events, ['start', 'trust', 'close', 'open'])
+  assert.deepEqual(f.events, ['start', 'trust', 'close', 'cache', 'open'])
   assert.deepEqual(f.read(), { ...original, 'http.proxy': WORKBUDDY_PROXY })
   assert.deepEqual(Object.keys(JSON.parse(readFileSync(f.config.backupPath, 'utf8'))).sort(), ['applied', 'original', 'schema'])
   assert.equal(readFileSync(f.config.backupPath, 'utf8').includes('auth'), false)
@@ -90,7 +143,7 @@ test('端口不可用或证书授权取消时不改 WorkBuddy 配置', async t =
 test('缺少证书时完成授权后才修改代理，已受信任时不重复安装', async t => {
   const f = setup(t); f.set({ trusted: false })
   await f.protection.enable()
-  assert.deepEqual(f.events, ['start', 'trust', 'install', 'trust', 'close', 'open'])
+  assert.deepEqual(f.events, ['start', 'trust', 'install', 'trust', 'close', 'cache', 'open'])
   await f.protection.disable(); await f.protection.enable()
   assert.equal(f.events.filter(e => e === 'install').length, 1)
 })
@@ -144,7 +197,7 @@ test('完全移除先关闭客户端、恢复配置和停止代理，撤销证�
   await f.protection.enable()
   f.events.length = 0
   await f.protection.remove()
-  assert.deepEqual(f.events, ['close', 'stop', 'remove', 'open'])
+  assert.deepEqual(f.events, ['close', 'cache', 'stop', 'remove', 'open'])
   assert.deepEqual(f.read(), { 'http.proxySupport': 'on', language: 'zh' })
   assert.equal(f.config.backup(), undefined)
   assert.equal(f.protection.snapshot().certificatePresent, false)

@@ -8,7 +8,7 @@ import {
   shell,
   type IpcMainInvokeEvent
 } from 'electron'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { watchFile, unwatchFile, existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -224,7 +224,7 @@ else {
         if (process.env.APG_HTTPS_CA_DIR && proxySettings.isConnected() && !proxySettings.backup()) proxySettings.apply()
       }
       protection = new WorkBuddyProtection(proxySettings, {
-        client: new WorkBuddyProcess(isolated ? 'linux' : process.platform),
+        client: new WorkBuddyProcess(isolated ? 'linux' : process.platform, dirname(proxySettings.settingsPath)),
         proxy: nativeProxy ?? { running: false, async start() { throw new Error('运行时未安装。') }, async stop() {} },
         checkCertificate: async () => { await certificate.remember(); return checkUserCertificate(caDirectory) },
         installCertificate: () => installUserCertificate(join(caDirectory, 'mitmproxy-ca-cert.pem')),

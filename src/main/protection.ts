@@ -4,7 +4,7 @@ import type { RecordSummary } from '../shared/types'
 import { WorkBuddyProxySettings } from './workbuddy-proxy-settings'
 
 interface Services {
-  client: { executable(): Promise<string | undefined>; close(): Promise<boolean>; open(): Promise<void> }
+  client: { executable(): Promise<string | undefined>; close(): Promise<boolean>; open(): Promise<void>; clearCertificateCache(): Promise<void> }
   proxy: { running: boolean; start(): Promise<void>; stop(): Promise<void> }
   checkCertificate(): Promise<boolean>
   installCertificate(): Promise<void>
@@ -104,6 +104,7 @@ export class WorkBuddyProtection extends EventEmitter {
       }
       this.update({ certificateTrusted: true, certificatePresent: true, message: '正在保存原代理设置并重启 WorkBuddy…' })
       closed = await this.services.client.close()
+      await this.services.client.clearCertificateCache()
       touched = true
       this.config.apply()
       this.update({ managed: true })
@@ -167,6 +168,7 @@ export class WorkBuddyProtection extends EventEmitter {
     try {
       // 证书撤销后再重开客户端，避免它继续使用重启前缓存的 CA。
       closed = await this.services.client.close()
+      await this.services.client.clearCertificateCache()
       this.config.restore()
       await this.services.proxy.stop()
       await this.services.removeCertificate()
